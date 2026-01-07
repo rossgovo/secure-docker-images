@@ -2,11 +2,12 @@ name: build-sign-attest
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
     tags: ["v*.*.*"]
 
 permissions:
-  contents: read
+  contents: write
+  actions: read
   packages: write
   id-token: write
   attestations: write
@@ -19,7 +20,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -28,7 +30,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
+      - name: Docker metadata (tags + OCI labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -44,7 +46,8 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Build and push image
         id: push
@@ -52,38 +55,28 @@ jobs:
         with:
           context: .
           push: true
-          tags: |
-            ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      # Keyless signing (cosign installer action)
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v3
-        # cosign-installer installs cosign and verifies release integrity :contentReference[oaicite:3]{index=3}
-
-      - name: Cosign sign (keyless)
-        run: |
-          cosign sign --yes \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
-
-      # SLSA provenance attestation (push to OCI registry)
-      - name: Attest build provenance (SLSA)
-        uses: actions/attest-build-provenance@v3
+      # Gate: fail the pipeline if HIGH/CRITICAL vulnerabilities are found
+      - name: Scan pushed image (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@master
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
-        # subject-name must be fully-qualified and WITHOUT tag when pushing to registry :contentReference[oaicite:4]{index=4}
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "1"
 
-      # Generate SBOM for the pushed image (CycloneDX JSON), then attest it
+      # Generate SBOM file (CycloneDX)
       - name: Generate SBOM (CycloneDX)
         uses: anchore/sbom-action@v0
         with:
           image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
           format: cyclonedx-json
           output-file: sbom.cyclonedx.json
-        # anchore/sbom-action generates SBOMs (Syft under the hood) :contentReference[oaicite:5]{index=5}
+          upload-release-assets: false
 
+      # Attach SBOM to the image digest as an attestation (for policy enforcement)
       - name: Attest SBOM (CycloneDX)
         uses: actions/attest-sbom@v3
         with:
@@ -91,4 +84,20 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           sbom-path: sbom.cyclonedx.json
           push-to-registry: true
-        # attest-sbom supports CycloneDX JSON and push-to-registry :contentReference[oaicite:6]{index=6}
+
+      # Sign image digest (keyless via GitHub OIDC)
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Cosign sign (keyless)
+        run: |
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
+
+      # SLSA build provenance attestation (signed, pushed to registry)
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
