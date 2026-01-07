@@ -1,7 +1,9 @@
+# .github/workflows/release.yml
 name: build-sign-attest
 
 on:
   push:
+    # branches: ["main"]
     tags: ["v*.*.*"]
 
 permissions:
@@ -16,8 +18,11 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,32 +50,72 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
+      - name: Set up QEMU (for arm64 builds)
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push image
+      - name: Build and push image (multi-arch)
         id: push
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Main cache
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
 
-      # Gate: fail if HIGH/CRITICAL (but ignore unfixed base-image noise)
-      - name: Scan pushed image (fail on HIGH/CRITICAL)
+  scan:
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+    steps:
+      - name: Login to GHCR (for pulls during scan)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write Trivy config for platform
+        run: |
+          cat > trivy.yaml <<'YAML'
+          image:
+            platform: "${{ matrix.platform }}"
+          YAML
+
+      - name: Trivy scan (${{ matrix.platform }}) (fail on HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
+          image-ref: ${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}
           format: table
           severity: CRITICAL,HIGH
           exit-code: "1"
           ignore-unfixed: true
+          trivy-config: trivy.yaml
+
+  bless:
+    runs-on: ubuntu-latest
+    needs: [build, scan]
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate SBOM (CycloneDX)
         uses: anchore/sbom-action@v0
         with:
-          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
+          image: ${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}
           format: cyclonedx-json
           output-file: sbom.cyclonedx.json
           upload-release-assets: false
@@ -78,8 +123,8 @@ jobs:
       - name: Attest SBOM (CycloneDX)
         uses: actions/attest-sbom@v3
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-name: ${{ needs.build.outputs.image }}
+          subject-digest: ${{ needs.build.outputs.digest }}
           sbom-path: sbom.cyclonedx.json
           push-to-registry: true
 
@@ -89,11 +134,11 @@ jobs:
       - name: Cosign sign (keyless)
         run: |
           cosign sign --yes \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
+            ${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}
 
       - name: Attest build provenance (SLSA)
         uses: actions/attest-build-provenance@v3
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-name: ${{ needs.build.outputs.image }}
+          subject-digest: ${{ needs.build.outputs.digest }}
           push-to-registry: true
