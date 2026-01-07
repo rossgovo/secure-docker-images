@@ -2,9 +2,8 @@ name: ghcr-retention
 
 on:
   workflow_dispatch:
-  # Should usually run on a schedule e.g: 
   # schedule:
-  #   - cron: "0 3 * * 0" # Sundays 03:00 UTC
+  #   - cron: "0 3 * * 0"
 
 permissions:
   contents: read
@@ -14,24 +13,20 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      # 1) Delete old untagged versions
       - name: Delete old untagged image versions
         uses: actions/delete-package-versions@v5
         with:
           package-type: container
-          # For GHCR images published as ghcr.io/<owner>/<repo>, this is usually just the repo name
           package-name: ${{ github.event.repository.name }}
           delete-only-untagged-versions: "true"
-          min-versions-to-keep: 3 # Only keep 3 as this is just for testing
+          min-versions-to-keep: 3
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 2) Delete old CI-build tags but keep releases + latest
-      - name: Delete old non-release tags (keep semver + latest)
+      - name: Delete old non-release tags (keep semver + latest + caches)
         uses: actions/delete-package-versions@v5
         with:
           package-type: container
           package-name: ${{ github.event.repository.name }}
-          min-versions-to-keep: 3 # Only keep 3 as this is just for testing
-          # Keep: latest, and semver tags like 1.2.3 / 1.2 / 1
-          ignore-versions: '^(latest|\d+.\d+.\d+|\d+.\d+|\d+)$'
+          min-versions-to-keep: 3
+          ignore-versions: '^(latest|buildcache|buildcache-pr|\d+\.\d+\.\d+|\d+\.\d+|\d+)$'
           token: ${{ secrets.GITHUB_TOKEN }}

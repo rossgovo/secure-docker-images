@@ -9,63 +9,78 @@ permissions:
   pull-requests: write
 
 env:
-  LOCAL_IMAGE: hello-express:pr-${{ github.sha }}
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   pr:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up QEMU (for arm64 builds)
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image (local only)
+      # Build a single-platform image and load it locally (no push)
+      - name: Build image (${{ matrix.platform }}) (local only)
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           load: true
-          tags: ${{ env.LOCAL_IMAGE }}
+          platforms: ${{ matrix.platform }}
+          tags: hello-express:pr-${{ github.sha }}-${{ matrix.platform }}
+          # Separate PR cache (shared across both arch builds)
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-pr
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-pr,mode=max
 
-      - name: Trivy scan (fail on HIGH/CRITICAL)
+      # Gate: fail if HIGH/CRITICAL vulns are found
+      - name: Trivy scan (${{ matrix.platform }}) (fail on HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.LOCAL_IMAGE }}
+          image-ref: hello-express:pr-${{ github.sha }}-${{ matrix.platform }}
           format: table
           severity: CRITICAL,HIGH
           exit-code: "1"
           ignore-unfixed: true
 
-      - name: Trivy scan (write report)
+      # Always comment per-platform results
+      - name: Trivy scan (${{ matrix.platform }}) (write report)
         if: always()
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.LOCAL_IMAGE }}
+          image-ref: hello-express:pr-${{ github.sha }}-${{ matrix.platform }}
           format: table
-          output: trivy.txt
+          output: trivy-${{ matrix.platform }}.txt
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "0"
 
-      - name: Create PR comment body
+      - name: Create PR comment body (${{ matrix.platform }})
         if: always()
         run: |
           {
-            echo "## Trivy scan results (HIGH/CRITICAL)"
+            echo "## Trivy scan results (${{ matrix.platform }})"
             echo ""
             echo "Commit: \`${GITHUB_SHA}\`"
             echo ""
-            echo "Image: \`${{ env.LOCAL_IMAGE }}\`"
-            echo ""
             echo '```'
-            cat trivy.txt || true
+            cat trivy-${{ matrix.platform }}.txt || true
             echo '```'
-          } > pr-comment.md
+          } > pr-comment-${{ matrix.platform }}.md
 
-      - name: Post sticky PR comment
+      - name: Post sticky PR comment (${{ matrix.platform }})
         if: always()
         uses: marocchino/sticky-pull-request-comment@v2
         with:
-          header: trivy-scan
-          path: pr-comment.md
+          header: trivy-scan-${{ matrix.platform }}
+          path: pr-comment-${{ matrix.platform }}.md
