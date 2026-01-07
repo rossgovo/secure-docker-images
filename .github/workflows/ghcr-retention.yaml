@@ -14,7 +14,7 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      # 1) Delete old untagged versions (biggest win, lowest risk)
+      # 1) Delete old untagged versions
       - name: Delete old untagged image versions
         uses: actions/delete-package-versions@v5
         with:
@@ -31,7 +31,7 @@ jobs:
         with:
           package-type: container
           package-name: ${{ github.event.repository.name }}
-          min-versions-to-keep: 3 # Only keep 1 as this is just for testing
+          min-versions-to-keep: 3 # Only keep 3 as this is just for testing
           # Keep: latest, and semver tags like 1.2.3 / 1.2 / 1
           ignore-versions: '^(latest|\\d+\\.\\d+\\.\\d+|\\d+\\.\\d+|\\d+)$'
           token: ${{ secrets.GITHUB_TOKEN }}

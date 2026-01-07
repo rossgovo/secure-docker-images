@@ -2,7 +2,6 @@ name: build-sign-attest
 
 on:
   push:
-    branches: ["main"]
     tags: ["v*.*.*"]
 
 permissions:
@@ -17,7 +16,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -58,7 +57,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      # Gate: fail the pipeline if HIGH/CRITICAL vulnerabilities are found
+      # Gate: fail if HIGH/CRITICAL (but ignore unfixed base-image noise)
       - name: Scan pushed image (fail on HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@master
         with:
@@ -68,7 +67,6 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
 
-      # Generate SBOM file (CycloneDX)
       - name: Generate SBOM (CycloneDX)
         uses: anchore/sbom-action@v0
         with:
@@ -77,7 +75,6 @@ jobs:
           output-file: sbom.cyclonedx.json
           upload-release-assets: false
 
-      # Attach SBOM to the image digest as an attestation (for policy enforcement)
       - name: Attest SBOM (CycloneDX)
         uses: actions/attest-sbom@v3
         with:
@@ -86,7 +83,6 @@ jobs:
           sbom-path: sbom.cyclonedx.json
           push-to-registry: true
 
-      # Sign image digest (keyless via GitHub OIDC)
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
@@ -95,7 +91,6 @@ jobs:
           cosign sign --yes \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
 
-      # SLSA build provenance attestation (signed, pushed to registry)
       - name: Attest build provenance (SLSA)
         uses: actions/attest-build-provenance@v3
         with:
