@@ -33,6 +33,16 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 
 This does not end up in the final image, it only speeds up the build step. Combined with registry cache export, this cache can remain effective across CI runs.
 
+> [!WARNING]
+> **PR build cache and forks**
+>
+> The PR workflow uses a GHCR registry-backed BuildKit cache (e.g. `:buildcache-pr`). This requires authenticating to GHCR with the repo-scoped `GITHUB_TOKEN` and `packages: write` permissions.
+>
+> As a result, this setup will only work for pull requests from branches within this repository. For fork-based PRs, GitHub typically restricts token permissions, and the registry cache push/pull can fail (e.g. 403 from `ghcr.io/token`).
+>
+> If we need to support fork PRs we will need to disable registry caching in the PR workflow by removing `cache-from` / `cache-to` (or switching to a fork-safe cache strategy).
+
+
 ### 3) Multi-architecture builds (amd64 + arm64)
 
 We publish a multi-arch image for:
