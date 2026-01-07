@@ -68,7 +68,7 @@ jobs:
         with:
           image-ref: hello-express:pr-${{ github.sha }}-${{ matrix.platform_tag }}
           format: table
-          output: trivy-${{ matrix.platform }}.txt
+          output: trivy-${{ matrix.platform_tag }}.txt
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "0"
@@ -82,13 +82,13 @@ jobs:
             echo "Commit: \`${GITHUB_SHA}\`"
             echo ""
             echo '```'
-            cat trivy-${{ matrix.platform }}.txt || true
+            cat trivy-${{ matrix.platform_tag }}.txt || true
             echo '```'
-          } > pr-comment-${{ matrix.platform }}.md
+          } > pr-comment-${{ matrix.platform_tag }}.md
 
       - name: Post sticky PR comment (${{ matrix.platform }})
         if: always()
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: trivy-scan-${{ matrix.platform }}
-          path: pr-comment-${{ matrix.platform }}.md
+          path: pr-comment-${{ matrix.platform_tag }}.md
