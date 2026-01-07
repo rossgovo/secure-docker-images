@@ -66,7 +66,7 @@ jobs:
         if: always()
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: hello-express:pr-${{ github.sha }}-${{ matrix.platform }}
+          image-ref: hello-express:pr-${{ github.sha }}-${{ matrix.platform_tag }}
           format: table
           output: trivy-${{ matrix.platform }}.txt
           severity: CRITICAL,HIGH
