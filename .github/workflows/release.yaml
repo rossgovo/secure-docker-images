@@ -3,6 +3,7 @@ name: build-sign-attest
 on:
   push:
     branches: [ "main" ]
+    tags: ["v*.*.*"]
 
 permissions:
   contents: read
@@ -27,6 +28,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          labels: |
+            org.opencontainers.image.title=hello-express
+            org.opencontainers.image.description=Hello World Express service
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Build and push image
@@ -36,7 +53,8 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
       # Keyless signing (cosign installer action)
       - name: Install cosign
