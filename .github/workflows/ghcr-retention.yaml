@@ -22,7 +22,7 @@ jobs:
           # For GHCR images published as ghcr.io/<owner>/<repo>, this is usually just the repo name
           package-name: ${{ github.event.repository.name }}
           delete-only-untagged-versions: "true"
-          min-versions-to-keep: 1 # Only keep 1 as this is just for testing
+          min-versions-to-keep: 3 # Only keep 3 as this is just for testing
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # 2) Delete old CI-build tags but keep releases + latest
@@ -31,7 +31,7 @@ jobs:
         with:
           package-type: container
           package-name: ${{ github.event.repository.name }}
-          min-versions-to-keep: 1 # Only keep 1 as this is just for testing
+          min-versions-to-keep: 3 # Only keep 1 as this is just for testing
           # Keep: latest, and semver tags like 1.2.3 / 1.2 / 1
           ignore-versions: '^(latest|\\d+\\.\\d+\\.\\d+|\\d+\\.\\d+|\\d+)$'
           token: ${{ secrets.GITHUB_TOKEN }}
