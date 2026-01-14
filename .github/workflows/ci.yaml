@@ -1,0 +1,168 @@
+name: pr-build-scan
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  pr:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            platform_tag: linux-amd64
+          - platform: linux/arm64
+            platform_tag: linux-arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GHCR (for registry cache)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Detect OpenVEX file (optional)
+        id: vex
+        shell: bash
+        run: |
+          if [ -f "./vex.openvex.json" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "path=./vex.openvex.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up QEMU (for arm64 builds)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (${{ matrix.platform }}) (local only)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          platforms: ${{ matrix.platform }}
+          tags: hello-express:pr-${{ github.sha }}-${{ matrix.platform_tag }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-pr
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-pr,mode=max
+
+      # --- Gate scan (fails job on HIGH/CRITICAL fixable vulns) ---
+      - name: Trivy gate scan (${{ matrix.platform }}) (WITH OpenVEX)
+        if: steps.vex.outputs.found == 'true'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: hello-express:pr-${{ github.sha }}-${{ matrix.platform_tag }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+        env:
+          TRIVY_VEX: ${{ steps.vex.outputs.path }}
+
+      - name: Trivy gate scan (${{ matrix.platform }}) (NO VEX)
+        if: steps.vex.outputs.found != 'true'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: hello-express:pr-${{ github.sha }}-${{ matrix.platform_tag }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+
+      # --- Report scan (always runs; JSON so we can summarize safely) ---
+      - name: Trivy report scan (${{ matrix.platform }}) (WITH OpenVEX, write JSON)
+        if: always() && steps.vex.outputs.found == 'true'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: hello-express:pr-${{ github.sha }}-${{ matrix.platform_tag }}
+          format: json
+          output: trivy-${{ matrix.platform_tag }}.json
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+        env:
+          TRIVY_VEX: ${{ steps.vex.outputs.path }}
+
+      - name: Trivy report scan (${{ matrix.platform }}) (NO VEX, write JSON)
+        if: always() && steps.vex.outputs.found != 'true'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: hello-express:pr-${{ github.sha }}-${{ matrix.platform_tag }}
+          format: json
+          output: trivy-${{ matrix.platform_tag }}.json
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Summarize Trivy results (${{ matrix.platform }})
+        if: always()
+        id: summary
+        shell: bash
+        run: |
+          FILE="trivy-${{ matrix.platform_tag }}.json"
+          if [ ! -f "$FILE" ]; then
+            echo "total=0" >> "$GITHUB_OUTPUT"
+            echo "critical=0" >> "$GITHUB_OUTPUT"
+            echo "high=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "$FILE")
+          HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' "$FILE")
+          TOTAL=$((CRITICAL + HIGH))
+
+          echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+          echo "critical=$CRITICAL" >> "$GITHUB_OUTPUT"
+          echo "high=$HIGH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Trivy JSON report artifact (${{ matrix.platform }})
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-${{ matrix.platform_tag }}
+          path: trivy-${{ matrix.platform_tag }}.json
+          if-no-files-found: ignore
+
+      # --- Comment only if vulnerabilities are found (short message) ---
+      - name: Create PR comment body (${{ matrix.platform }})
+        if: always() && steps.summary.outputs.total != '0'
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          {
+            echo "## Trivy findings (${{ matrix.platform }})"
+            echo ""
+            echo "- CRITICAL: **${{ steps.summary.outputs.critical }}**"
+            echo "- HIGH: **${{ steps.summary.outputs.high }}**"
+            echo ""
+            if [ "${{ steps.vex.outputs.found }}" = "true" ]; then
+              echo "- OpenVEX applied: **yes** (\`${{ steps.vex.outputs.path }}\`)"
+            else
+              echo "- OpenVEX applied: **no**"
+            fi
+            echo ""
+            echo "Full JSON report is uploaded as a workflow artifact. Run: ${RUN_URL}"
+          } > pr-comment-${{ matrix.platform_tag }}.md
+
+      - name: Post sticky PR comment (${{ matrix.platform }})
+        if: always() && steps.summary.outputs.total != '0'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: trivy-scan-${{ matrix.platform_tag }}
+          path: pr-comment-${{ matrix.platform_tag }}.md
