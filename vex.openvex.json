@@ -1,0 +1,30 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://example.com/vex/hello-express/vex-001",
+  "author": "Ross Garrett",
+  "timestamp": "2026-01-14T17:08:40Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2025-64756"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/node:latest?repository_url=node%3Alatest",
+          "subcomponents": [
+            {
+              "@id": "pkg:npm/glob@10.4.5"
+            },
+            {
+              "@id": "pkg:npm/glob@11.0.3"
+            }
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "action_statement": "glob is not used by the application at runtime; present only via bundled tooling."
+    }
+  ]
+}
