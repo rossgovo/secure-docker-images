@@ -60,8 +60,8 @@ jobs:
           load: true
           platforms: ${{ matrix.platform }}
           tags: hello-express:pr-${{ github.sha }}-${{ matrix.platform_tag }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-pr-${{ matrix.platform }}
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-pr-${{ matrix.platform }},mode=max
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-pr-${{ matrix.platform_tag }}
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-pr-${{ matrix.platform_tag }},mode=max
 
       # --- Gate scan (fails job on HIGH/CRITICAL fixable vulns) ---
       - name: Trivy gate scan (${{ matrix.platform }}) (WITH OpenVEX)
