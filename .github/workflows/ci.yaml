@@ -160,7 +160,7 @@ jobs:
           } > pr-comment-${{ matrix.platform_tag }}.md
 
       - name: Create PR comment body no findings (${{ matrix.platform }})
-        if: always() && steps.summary.outputs.total === '0'
+        if: always() && steps.summary.outputs.total == '0'
         run: |
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           {
