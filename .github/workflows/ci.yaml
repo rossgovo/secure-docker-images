@@ -140,7 +140,6 @@ jobs:
           path: trivy-${{ matrix.platform_tag }}.json
           if-no-files-found: ignore
 
-      # --- Comment only if vulnerabilities are found (short message) ---
       - name: Create PR comment body (${{ matrix.platform }})
         if: always() && steps.summary.outputs.total != '0'
         run: |
@@ -160,8 +159,26 @@ jobs:
             echo "Full JSON report is uploaded as a workflow artifact. Run: ${RUN_URL}"
           } > pr-comment-${{ matrix.platform_tag }}.md
 
+      - name: Create PR comment body no findings (${{ matrix.platform }})
+        if: always() && steps.summary.outputs.total === '0'
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          {
+            echo "## Trivy findings (${{ matrix.platform }})"
+            echo ""
+            echo "- Good news, no insecure packages found"
+            echo ""
+            if [ "${{ steps.vex.outputs.found }}" = "true" ]; then
+              echo "- OpenVEX applied: **yes** (\`${{ steps.vex.outputs.path }}\`)"
+            else
+              echo "- OpenVEX applied: **no**"
+            fi
+            echo ""
+            echo "Full JSON report is uploaded as a workflow artifact. Run: ${RUN_URL}"
+          } > pr-comment-${{ matrix.platform_tag }}.md
+
       - name: Post sticky PR comment (${{ matrix.platform }})
-        if: always() && steps.summary.outputs.total != '0'
+        if: always()
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: trivy-scan-${{ matrix.platform_tag }}
