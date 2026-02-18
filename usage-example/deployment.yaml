@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-express
+  labels:
+    app: hello-express
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hello-express
+  template:
+    metadata:
+      labels:
+        app: hello-express
+    spec:
+      containers:
+        - name: hello-express
+          image: ghcr.io/rossgovo/secure-docker-images@sha256:b830abc4c8ec30c73ce4789a8954b521b999a01c8548852129bd439cddd3249a
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "8080"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-express
+spec:
+  selector:
+    app: hello-express
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+  type: ClusterIP

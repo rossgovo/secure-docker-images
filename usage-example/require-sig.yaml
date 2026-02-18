@@ -1,0 +1,23 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-signed-images
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: require-cosign-keyless
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/rossgovo/secure-docker-images*"
+          attestors:
+            - entries:
+                - keyless:
+                    issuerRegExp: https://token\.actions\.githubusercontent\.com
+                    subjectRegExp: https://github\.com/rossgovo/secure-docker-images/.github/workflows/.*@refs/tags/.*
+                    rekor:
+                      url: https://rekor.sigstore.dev
