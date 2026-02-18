@@ -190,3 +190,79 @@ git push
 ```
 
 CI will automatically detect `vex.openvex.json` and apply it during scans.
+
+
+## Supply chain security: SLSA provenance, SBOM attestations, and signing
+
+Once an image has passed the vulnerability gate, this repo “blesses” the build by attaching **verifiable evidence** to the **immutable image digest** (not a mutable tag). This is the core enterprise pattern: **build → scan → attest/sign → enforce in runtime**.
+
+### Why we use digests (not tags)
+
+Tags (e.g. `:v1.2.3`, `:latest`) are human-friendly but mutable pointers. A digest (`@sha256:...`) uniquely identifies the exact image content.
+
+All of the evidence below is bound to the digest so it can’t be swapped underneath you by retagging.
+
+---
+
+### SBOM (Software Bill of Materials)
+
+An **SBOM** is a machine-readable inventory of what’s inside the artefact:
+- OS packages from the base image
+- application dependencies (e.g. npm/pnpm packages)
+- versions and identifiers (used for vuln and licence analysis)
+
+In this pipeline we generate a **CycloneDX** SBOM for the **pushed digest** (so it matches what you will run):
+
+- `anchore/sbom-action` generates `sbom.cyclonedx.json` by analysing the image filesystem.
+- `actions/attest-sbom` creates a **signed attestation** that binds that SBOM file to the image digest and publishes it to the registry.
+
+Why attest (instead of only uploading a file)?
+- Uploading an SBOM file as a workflow artefact is useful, but it’s not cryptographically tied to the image.
+- An **SBOM attestation** proves: “this SBOM belongs to this exact digest”.
+
+This becomes enforceable later (e.g. “only run images with an SBOM attached”).
+
+---
+
+### SLSA build provenance (how the artefact was produced)
+
+**SLSA provenance** records “how did we build this?” and “which CI identity built it?”:
+- repository + workflow identity
+- run metadata (build context, builder)
+- an attestation that can be verified later
+
+In this repo:
+- `actions/attest-build-provenance` creates a signed provenance attestation for the image digest and pushes it to the registry.
+
+Why provenance matters:
+- It lets policy engines enforce “only artefacts built by our CI pipeline from our repo”.
+- It helps incident response: you can trace exactly when/where the digest was built.
+
+---
+
+### Signing (who produced this artefact?)
+
+Signing answers:
+- “Was this image produced by the expected identity?”
+- “Has this digest been tampered with?”
+
+This repo uses **keyless** signing with `cosign`:
+- `cosign sign image@sha256:...` signs the immutable digest
+- the signature is stored in the registry alongside the image
+- no long-lived private keys in GitHub Secrets (identity comes from GitHub OIDC)
+
+Why sign:
+- It enables strong admission controls: “only allow images signed by our workflow identity”.
+- It complements provenance/SBOM: the digest is now both *described* (SBOM), *explained* (provenance), and *owned* (signature).
+
+---
+
+### “Blessing” order (recommended)
+
+A common pattern is:
+1) Generate SBOM
+2) Attest provenance (SLSA)
+3) Attest SBOM
+4) Sign digest
+
+This reduces the chance of having a “signed but missing evidence” artefact if someone inspects the registry mid-run, and keeps the story simple: **the signed digest has the required attestations present**.

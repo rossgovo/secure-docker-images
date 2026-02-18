@@ -147,6 +147,15 @@ jobs:
           output-file: sbom.cyclonedx.json
           upload-release-assets: false
 
+      # 1) Provenance first
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ${{ needs.build.outputs.image }}
+          subject-digest: ${{ needs.build.outputs.digest }}
+          push-to-registry: true
+
+      # 2) SBOM attestation second
       - name: Attest SBOM (CycloneDX)
         uses: actions/attest-sbom@v3
         with:
@@ -155,6 +164,7 @@ jobs:
           sbom-path: sbom.cyclonedx.json
           push-to-registry: true
 
+      # 3) Sign last
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
@@ -162,10 +172,3 @@ jobs:
         run: |
           cosign sign --yes \
             ${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}
-
-      - name: Attest build provenance (SLSA)
-        uses: actions/attest-build-provenance@v3
-        with:
-          subject-name: ${{ needs.build.outputs.image }}
-          subject-digest: ${{ needs.build.outputs.digest }}
-          push-to-registry: true
