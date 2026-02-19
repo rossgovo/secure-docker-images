@@ -1,4 +1,23 @@
+# Dependencies / build output
 node_modules
 dist
+
+# VCS
 .git
+
+# Env / secrets
 .env*
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+**/*secret*
+**/*password*
+**/*token*
+
+# Editor / OS junk
+.DS_Store
+Thumbs.db
+.vscode
+.idea
